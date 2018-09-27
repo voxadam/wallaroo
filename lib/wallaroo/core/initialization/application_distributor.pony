@@ -35,37 +35,41 @@ actor ApplicationDistributor is Distributor
   let _auth: AmbientAuth
   let _routing_id_gen: RoutingIdGenerator = RoutingIdGenerator
   let _local_topology_initializer: LocalTopologyInitializer
-  let _application: Application val
+  let _app_name: String
+  let _pipeline: BasicPipeline val
 
-  new create(auth: AmbientAuth, application: Application val,
+  new create(auth: AmbientAuth, app_name: String,
+    pipeline: BasicPipeline val,
     local_topology_initializer: LocalTopologyInitializer)
   =>
     _auth = auth
     _local_topology_initializer = local_topology_initializer
-    _application = application
+    _app_name = app_name
+    _pipeline = pipeline
 
   be distribute(cluster_initializer: (ClusterInitializer | None),
     worker_count: USize, worker_names: Array[String] val,
     initializer_name: String)
   =>
     @printf[I32]("Initializing application\n".cstring())
-    _distribute(_application, cluster_initializer, worker_count,
+    _distribute(cluster_initializer, worker_count,
       worker_names, initializer_name)
 
   be topology_ready() =>
     @printf[I32]("Application has successfully initialized.\n".cstring())
 
-  fun ref _distribute(application: Application val,
-    cluster_initializer: (ClusterInitializer | None), worker_count: USize,
-    worker_names: Array[WorkerName] val, initializer_name: WorkerName)
+  fun ref _distribute(cluster_initializer: (ClusterInitializer | None),
+    worker_count: USize, worker_names: Array[WorkerName] val,
+    initializer_name: WorkerName)
   =>
     @printf[I32]("---------------------------------------------------------\n".cstring())
     @printf[I32]("vvvvvv|Initializing Topologies for Workers|vvvvvv\n\n".cstring())
 
-    match application.validate()
-    | let err_msg: String =>
-      FatalUserError(err_msg)
-    end
+    //!@
+    // match application.validate()
+    // | let err_msg: String =>
+    //   FatalUserError(err_msg)
+    // end
 
     try
       let all_workers_trn = recover trn Array[WorkerName] end
@@ -142,8 +146,30 @@ actor ApplicationDistributor is Distributor
       let non_shrinkable = recover trn SetIs[WorkerName] end
 
 
-      @printf[I32](("Found " + application.pipelines.size().string() +
-        " pipelines in application\n").cstring())
+      // @printf[I32](("Found " + application.pipelines.size().string() +
+      //   " pipelines in application\n").cstring())
+
+//
+//
+//
+///////////////////////
+// !@ NEW CODE START
+///////////////////////
+
+
+      let logical_graph = _pipeline.graph()
+
+      // Traverse graph from sinks to sources, moving any key_by stages back
+      // to immediate upstream nodes.
+
+
+
+///////////////////////
+// !@ NEW CODE END
+///////////////////////
+//
+//
+//
 
       // Add stepbuilders for each pipeline into LocalGraphs to distribute to
       // workers
@@ -627,7 +653,7 @@ actor ApplicationDistributor is Distributor
                   end
 
                 let next_id = next_runner_builder.id()
-                let next_initializer = StepBuilder(application.name(),
+                let next_initializer = StepBuilder(_app_name,
                   worker, pipeline.name(), next_runner_builder,
                   next_id where pre_state_target_ids' = pre_state_target_ids)
                 step_map(next_id) = ProxyAddress(worker, next_id)
@@ -702,7 +728,7 @@ actor ApplicationDistributor is Distributor
                   end
 
                   for s_id in psd.worker_to_step_id(w)?.values() do
-                    let next_initializer = StepBuilder(application.name(),
+                    let next_initializer = StepBuilder(_app_name,
                       w, pipeline.name(), next_runner_builder, s_id)
                     step_map(s_id) = ProxyAddress(w, s_id)
 
@@ -744,7 +770,7 @@ actor ApplicationDistributor is Distributor
                   next_runner_builder.name() + " on " + worker + "\n")
                   .cstring())
                 let next_id = next_runner_builder.id()
-                let next_initializer = StepBuilder(application.name(),
+                let next_initializer = StepBuilder(_app_name,
                   worker, pipeline.name(), next_runner_builder, next_id)
                 step_map(next_id) = ProxyAddress(worker, next_id)
 
@@ -948,7 +974,7 @@ actor ApplicationDistributor is Distributor
 
         let local_topology =
           try
-            LocalTopology(application.name(), w, g.clone()?,
+            LocalTopology(_app_name, w, g.clone()?,
               sendable_step_map, state_subpartitions, sendable_pre_state_data,
               consume p_ids, consume worker_state_step_ids, all_workers,
               non_shrinkable_to_send, state_routing_ids_to_send,

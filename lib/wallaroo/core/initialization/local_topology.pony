@@ -271,7 +271,7 @@ class val LocalTopology
   fun ne(that: box->LocalTopology): Bool => not eq(that)
 
 actor LocalTopologyInitializer is LayoutInitializer
-  let _application: Application val
+  let _app_name: String
   let _worker_name: WorkerName
   let _env: Env
   let _auth: AmbientAuth
@@ -340,7 +340,7 @@ actor LocalTopologyInitializer is LayoutInitializer
 
   var _t: USize = 0
 
-  new create(app: Application val, worker_name: WorkerName, env: Env,
+  new create(app_name: String, worker_name: WorkerName, env: Env,
     auth: AmbientAuth, connections: Connections,
     router_registry: RouterRegistry, metrics_conn: MetricsSink,
     is_initializer: Bool, data_receivers: DataReceivers,
@@ -354,7 +354,7 @@ actor LocalTopologyInitializer is LayoutInitializer
     is_joining: Bool = false,
     joining_state_routing_ids: (Map[StateName, RoutingId] val | None) = None)
   =>
-    _application = app
+    _app_name = app_name
     _worker_name = worker_name
     _env = env
     _auth = auth
@@ -633,7 +633,7 @@ actor LocalTopologyInitializer is LayoutInitializer
         let data_notifier: DataChannelListenNotify iso =
           DataChannelListenNotifier(_worker_name, _auth, _connections,
             _is_initializer,
-            MetricsReporter(_application.name(), _worker_name,
+            MetricsReporter(_app_name, _worker_name,
               _metrics_conn),
             data_channel_filepath, this, _data_receivers, _recovery_replayer,
             _router_registry, _the_journal, _do_local_file_io)
@@ -701,7 +701,7 @@ actor LocalTopologyInitializer is LayoutInitializer
         let data_notifier: DataChannelListenNotify iso =
           DataChannelListenNotifier(_worker_name, _auth, _connections,
             _is_initializer,
-            MetricsReporter(_application.name(), _worker_name,
+            MetricsReporter(_app_name, _worker_name,
               _metrics_conn),
             data_channel_filepath, this, _data_receivers, _recovery_replayer,
             _router_registry, _the_journal, _do_local_file_io)

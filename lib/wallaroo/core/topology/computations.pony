@@ -37,29 +37,12 @@ interface StateComputation[In: Any val, Out: Any val, S: State ref] is
   // Return a tuple containing the result of the computation (which is None
   // if there is no value to forward) and a StateChange if there was one (or
   // None to indicate no state change).
-  fun apply(input: In, sc_repo: StateChangeRepository[S], state: S):
-    ((Out | Array[Out] val | None),
-     (StateChange[S] ref | DirectStateChange | None))
+  fun apply(input: In, state: S): (Out | Array[Out] val | None)
+
+  fun initial_state(): S
 
   fun name(): String
 
-  fun state_change_builders(): Array[StateChangeBuilder[S]] val
-
-trait val StateProcessor[S: State ref] is BasicComputation
-  fun name(): String
-  // Return a tuple containing a Bool indicating whether the message was
-  // finished processing here, a Bool indicating whether a route can still
-  // keep receiving data and the state change (or None if there was
-  // no state change).
-  fun apply(state: S, sc_repo: StateChangeRepository[S],
-    target_id_router: TargetIdRouter, metric_name: String,
-    pipeline_time_spent: U64, producer_id: RoutingId, producer: Producer ref,
-    i_msg_uid: MsgId, frac_ids: FractionalMessageId, latest_ts: U64,
-    metrics_id: U16, worker_ingress_ts: U64):
-    (Bool, (StateChange[S] ref | DirectStateChange | None), U64,
-      U64, U64)
-  fun state_name(): StateName
-  fun key(): Key
 
 trait KeyWrapper
   fun key(): Key

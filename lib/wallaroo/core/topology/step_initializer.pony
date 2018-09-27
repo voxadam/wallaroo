@@ -43,13 +43,11 @@ class val StepBuilder
   let _state_name: String
   let _runner_builder: RunnerBuilder
   let _id: RoutingId
-  let _pre_state_target_ids: Array[RoutingId] val
   let _is_stateful: Bool
 
   new val create(app_name: String, worker_name: String,
     pipeline_name': String, r: RunnerBuilder, id': RoutingId,
-    is_stateful': Bool = false,
-    pre_state_target_ids': Array[RoutingId] val = recover Array[RoutingId] end)
+    is_stateful': Bool = false)
   =>
     _app_name = app_name
     _worker_name = worker_name
@@ -58,13 +56,11 @@ class val StepBuilder
     _state_name = _runner_builder.state_name()
     _id = id'
     _is_stateful = is_stateful'
-    _pre_state_target_ids = pre_state_target_ids'
 
   fun name(): String => _runner_builder.name()
   fun state_name(): String => _state_name
   fun pipeline_name(): String => _pipeline_name
   fun id(): RoutingId => _id
-  fun pre_state_target_ids(): Array[RoutingId] val => _pre_state_target_ids
   fun is_prestate(): Bool => _runner_builder.is_prestate()
   fun is_stateful(): Bool => _is_stateful
   fun is_partitioned(): Bool => false
@@ -78,7 +74,7 @@ class val StepBuilder
     target_id_router: TargetIdRouter = EmptyTargetIdRouter): Step tag
   =>
     let runner = _runner_builder(where event_log = event_log, auth = auth,
-      router = router, pre_state_target_ids' = pre_state_target_ids())
+      router = router)
     let step = Step(auth, consume runner,
       MetricsReporter(_app_name, _worker_name, metrics_conn), _id,
       event_log, recovery_replayer,
@@ -93,11 +89,9 @@ class val SourceData
   let _state_name: String
   let _runner_builder: RunnerBuilder
   let _source_listener_builder_builder: SourceListenerBuilderBuilder
-  let _pre_state_target_ids: Array[RoutingId] val
 
   new val create(id': RoutingId, p_name: String, r: RunnerBuilder,
-    s: SourceListenerBuilderBuilder,
-    pre_state_target_ids': Array[RoutingId] val = recover Array[RoutingId] end)
+    s: SourceListenerBuilderBuilder)
   =>
     _id = id'
     _pipeline_name = p_name
@@ -106,15 +100,12 @@ class val SourceData
     _state_name = _runner_builder.state_name()
     _source_listener_builder_builder = s
 
-    _pre_state_target_ids = pre_state_target_ids'
-
   fun runner_builder(): RunnerBuilder => _runner_builder
 
   fun name(): String => _name
   fun state_name(): String => _state_name
   fun pipeline_name(): String => _pipeline_name
   fun id(): RoutingId => _id
-  fun pre_state_target_ids(): Array[RoutingId] val => _pre_state_target_ids
   fun is_prestate(): Bool => _runner_builder.is_prestate()
   fun is_stateful(): Bool => false
   fun is_partitioned(): Bool => false
@@ -155,7 +146,6 @@ class val EgressBuilder
   fun state_name(): String => ""
   fun pipeline_name(): String => _pipeline_name
   fun id(): RoutingId => _id
-  fun pre_state_target_ids(): Array[RoutingId] val => recover Array[RoutingId] end
   fun is_prestate(): Bool => false
   fun is_stateful(): Bool => false
   fun is_partitioned(): Bool => false
@@ -190,27 +180,9 @@ class val EgressBuilder
       end
     end
 
-class val PreStateData
-  let _state_name: String
-  let _pre_state_name: String
-  let _runner_builder: RunnerBuilder
-  let _target_ids: Array[RoutingId] val
-
-  new val create(runner_builder: RunnerBuilder, t_ids: Array[RoutingId] val) =>
-    _runner_builder = runner_builder
-    _state_name = runner_builder.state_name()
-    _pre_state_name = runner_builder.name()
-    _target_ids = t_ids
-
-  fun state_name(): String => _state_name
-  fun pre_state_name(): String => _pre_state_name
-  fun target_ids(): Array[RoutingId] val => _target_ids
-  fun clone_router_and_set_input_type(r: Router): Router =>
-    _runner_builder.clone_router_and_set_input_type(r)
-
 class val PreStatelessData
   """
-  Unlike PreStateData, this is simply used to create a StatelessPartitionRouter
+  This is used to create a StatelessPartitionRouter
   during local initialization. Whatever step/s come before a stateless
   partition do not need to do anything special; they only need the correct
   StatelessPartitionRouter.
@@ -244,7 +216,6 @@ class val PreStatelessData
   fun state_name(): String => ""
   fun pipeline_name(): String => _pipeline_name
   fun id(): U128 => _id
-  fun pre_state_target_ids(): Array[RoutingId] val => recover Array[RoutingId] end
   fun is_prestate(): Bool => false
   fun is_stateful(): Bool => false
   fun is_partitioned(): Bool => false

@@ -40,8 +40,8 @@ interface Runner
   // and a U64 indicating the last timestamp for calculating the duration of
   // the computation
   fun ref run[D: Any val](metric_name: String, pipeline_time_spent: U64,
-    data: D, producer_id: RoutingId, producer: Producer ref, router: Router,
-    target_id_router: TargetIdRouter,
+    data: D, key: Key, producer_id: RoutingId, producer: Producer ref,
+    router: Router, target_id_router: TargetIdRouter,
     i_msg_uid: MsgId, frac_ids: FractionalMessageId,
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64,
     metrics_reporter: MetricsReporter ref): (Bool, U64)
@@ -63,12 +63,9 @@ trait RollbackableRunner
   fun ref set_step_id(id: U128)
 
 trait val RunnerBuilder
-  fun apply(event_log: EventLog,
-    auth: AmbientAuth,
+  fun apply(event_log: EventLog, auth: AmbientAuth,
     next_runner: (Runner iso | None) = None,
-    router: (Router | None) = None,
-    pre_state_target_ids': Array[RoutingId] val = recover Array[RoutingId] end):
-      Runner iso^
+    router: (Router | None) = None): Runner iso^
 
   fun name(): String
   fun state_name(): StateName => ""
@@ -111,11 +108,10 @@ class val RunnerSequenceBuilder is RunnerBuilder
     auth: AmbientAuth,
     next_runner: (Runner iso | None) = None,
     router: (Router | None) = None,
-    pre_state_target_ids': Array[RoutingId] val = recover Array[RoutingId] end):
-      Runner iso^
+    grouper: (Shuffler | KeyGrouper | None) = None): Runner iso^
   =>
     var remaining: USize = _runner_builders.size()
-    var latest_runner: Runner iso = RouterRunner
+    var latest_runner: Runner iso = RouterRunner(grouper)
     while remaining > 0 do
       let next_builder: (RunnerBuilder | None) =
         try
@@ -125,8 +121,7 @@ class val RunnerSequenceBuilder is RunnerBuilder
         end
       match next_builder
       | let rb: RunnerBuilder =>
-        latest_runner = rb(event_log, auth,
-          consume latest_runner, router, pre_state_target_ids')
+        latest_runner = rb(event_log, auth, consume latest_runner, router)
       end
       remaining = remaining - 1
     end
@@ -180,14 +175,13 @@ class val ComputationRunnerBuilder[In: Any val, Out: Any val] is RunnerBuilder
     auth: AmbientAuth,
     next_runner: (Runner iso | None) = None,
     router: (Router | None) = None,
-    pre_state_target_ids': Array[RoutingId] val = recover Array[RoutingId] end):
-      Runner iso^
+    grouper: (Shuffler | KeyGrouper | None) = None): Runner iso^
   =>
     match (consume next_runner)
     | let r: Runner iso =>
       ComputationRunner[In, Out](_comp_builder(), consume r)
     else
-      ComputationRunner[In, Out](_comp_builder(), RouterRunner)
+      ComputationRunner[In, Out](_comp_builder(), RouterRunner(grouper))
     end
 
   fun name(): String => _comp_builder().name()
@@ -196,74 +190,34 @@ class val ComputationRunnerBuilder[In: Any val, Out: Any val] is RunnerBuilder
   fun is_stateless_parallel(): Bool => _parallelized
   fun id(): RoutingId => _id
 
-class val PreStateRunnerBuilder[In: Any val, Out: Any val,
-  S: State ref] is RunnerBuilder
-  let _state_comp: StateComputation[In, Out, S] val
-  let _state_name: String
-  let _partition_function: PartitionFunction[In] val
-  let _id: RoutingId
-  let _is_multi: Bool
-
-  new val create(state_comp: StateComputation[In, Out, S] val,
-    state_name': String, partition_function': PartitionFunction[In] val,
-    multi_worker: Bool = false)
-  =>
-    _state_comp = state_comp
-    _state_name = state_name'
-    _partition_function = partition_function'
-    _id = RoutingIdGenerator()
-    _is_multi = multi_worker
-
-  fun apply(event_log: EventLog,
-    auth: AmbientAuth,
-    next_runner: (Runner iso | None) = None,
-    router: (Router | None) = None,
-    pre_state_target_ids': Array[RoutingId] val = recover Array[RoutingId] end):
-      Runner iso^
-  =>
-    PreStateRunner[In, Out, S](_state_comp, _state_name, _partition_function,
-      pre_state_target_ids')
-
-  fun name(): String => _state_comp.name()
-  fun state_name(): StateName => _state_name
-  fun is_prestate(): Bool => true
-  fun is_stateful(): Bool => true
-  fun is_multi(): Bool => _is_multi
-  fun id(): RoutingId => _id
-  fun clone_router_and_set_input_type(r: Router): Router
-  =>
-    r
-
-class val StateRunnerBuilder[S: State ref] is RunnerBuilder
+class val StateRunnerBuilder[In: Any val, Out: Any val, S: State ref] is
+  RunnerBuilder
+  //!@
   // This is the id for the entire state collection. It's used, for example,
   // to route messages to a Key that exists on another worker where we don't
   // know the specific routing ids of the state steps.
-  let _id: RoutingId
-  let _state_builder: StateBuilder[S]
-  let _state_name: String
-  let _state_change_builders: Array[StateChangeBuilder[S]] val
 
-  new val create(state_builder: StateBuilder[S],
-    state_name': String,
-    state_change_builders: Array[StateChangeBuilder[S]] val)
-  =>
-    _state_builder = state_builder
-    _state_name = state_name'
-    _state_change_builders = state_change_builders
-    _id = RoutingIdGenerator()
+  let _state_comp: StateComputation[In, Out, S] val
+  let _state_name: StateName
+
+  new val create(state_comp: StateComputation[In, Out, S] val) =>
+    _state_comp = state_comp
+    _state_name = RoutingIdGenerator().string()
 
   fun apply(event_log: EventLog,
     auth: AmbientAuth,
     next_runner: (Runner iso | None) = None,
     router: (Router | None) = None,
-    pre_state_target_ids': Array[RoutingId] val = recover Array[RoutingId] end):
-      Runner iso^
+    grouper: (Shuffler | KeyGrouper | None) = None): Runner iso^
   =>
-    let sr = StateRunner[S](_state_name, _state_builder, event_log, auth)
-    for scb in _state_change_builders.values() do
-      sr.register_state_change(scb)
+    match (consume next_runner)
+    | let r: Runner iso =>
+      StateRunner[In, Out, S](_state_name, _state_comp, event_log, auth,
+        consume r)
+    else
+      StateRunner[In, Out, S](_state_name, _state_comp, event_log, auth,
+        RouterRunner(grouper))
     end
-    sr
 
   fun name(): String => _state_name + " StateRunnerBuilder"
   fun state_name(): StateName => _state_name
@@ -306,12 +260,9 @@ class val PartitionedStateRunnerBuilder[In: Any val, S: State ref] is
     _per_worker_parallelism = per_worker_parallelism'
     _multi_worker = multi_worker
 
-  fun apply(event_log: EventLog,
-    auth: AmbientAuth,
+  fun apply(event_log: EventLog, auth: AmbientAuth,
     next_runner: (Runner iso | None) = None,
-    router: (Router | None) = None,
-    pre_state_target_ids': Array[RoutingId] val = recover Array[RoutingId] end):
-      Runner iso^
+    router: (Router | None) = None): Runner iso^
   =>
     _state_runner_builder(event_log, auth, consume next_runner, router)
 
@@ -380,94 +331,98 @@ class ComputationRunner[In: Any val, Out: Any val]
     _next = consume next
 
   fun ref run[D: Any val](metric_name: String, pipeline_time_spent: U64,
-    data: D, producer_id: RoutingId, producer: Producer ref, router: Router,
-    target_id_router: TargetIdRouter,
+    data: D, key: Key, producer_id: RoutingId, producer: Producer ref,
+    router: Router, target_id_router: TargetIdRouter,
     i_msg_uid: MsgId, frac_ids: FractionalMessageId,
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64,
     metrics_reporter: MetricsReporter ref): (Bool, U64)
   =>
-    var computation_start: U64 = 0
-    var computation_end: U64 = 0
+    match data
+    | let input: In =>
+      let computation_start = Time.nanos()
+      let result = _computation(input)
+      let computation_end = Time.nanos()
 
-    (let is_finished, let last_ts) =
-      match data
-      | let input: In =>
-        computation_start = Time.nanos()
-        let result = _computation(input)
-        computation_end = Time.nanos()
-        let new_metrics_id = ifdef "detailed-metrics" then
-            // increment by 2 because we'll be reporting 2 step metrics below
-            metrics_id + 2
-          else
-            // increment by 1 because we'll be reporting 1 step metric below
-            metrics_id + 1
-          end
-
-        match result
-        | None => (true, computation_end)
-        | let output: Out =>
-          _next.run[Out](metric_name, pipeline_time_spent, output, producer_id,
-            producer, router, target_id_router,
-            i_msg_uid, frac_ids,
-            computation_end, new_metrics_id, worker_ingress_ts,
-            metrics_reporter)
-        | let outputs: Array[Out] val =>
-          var this_is_finished = true
-          var this_last_ts = computation_end
-
-          for (frac_id, output) in outputs.pairs() do
-            let o_frac_ids = match frac_ids
-            | None =>
-              recover val
-                Array[U32].init(frac_id.u32(), 1)
-              end
-            | let x: Array[U32 val] val =>
-              recover val
-                let z = Array[U32](x.size() + 1)
-                for xi in x.values() do
-                  z.push(xi)
-                end
-                z.push(frac_id.u32())
-                z
-              end
-            end
-
-            (let f, let ts) = _next.run[Out](metric_name,
-              pipeline_time_spent, output, producer_id, producer,
-              router, target_id_router,
-              i_msg_uid, o_frac_ids,
-              computation_end, new_metrics_id, worker_ingress_ts,
-              metrics_reporter)
-
-            // we are sending multiple messages, only mark this message as
-            // finished if all are finished
-            if (f == false) then
-              this_is_finished = false
-            end
-
-            this_last_ts = ts
-          end
-          (this_is_finished, this_last_ts)
+      let new_metrics_id = ifdef "detailed-metrics" then
+          // increment by 2 because we'll be reporting 2 step metrics below
+          metrics_id + 2
+        else
+          // increment by 1 because we'll be reporting 1 step metric below
+          metrics_id + 1
         end
-      else
-        @printf[I32]("ComputationRunner: Input was not correct type!\n"
-          .cstring())
-        Fail()
-        (true, latest_ts)
-      end
 
-    let latest_metrics_id = ifdef "detailed-metrics" then
-        metrics_reporter.step_metric(metric_name, _computation_name,
-          metrics_id, latest_ts, computation_start where prefix = "Before")
-        metrics_id + 1
-      else
-        metrics_id
-      end
+      (let is_finished, let last_ts) =
+        OutputProcessor[In](_next, metric_name, pipeline_time_spent, output,
+          key, producer_id, producer, router, target_id_router, i_msg_uid,
+          frac_ids, computation_end, new_metrics_id, worker_ingress_ts,
+          metrics_reporter)
 
-    metrics_reporter.step_metric(metric_name, _computation_name,
-      latest_metrics_id, computation_start, computation_end)
+      let latest_metrics_id = ifdef "detailed-metrics" then
+          metrics_reporter.step_metric(metric_name, _computation_name,
+            metrics_id, latest_ts, computation_start where prefix = "Before")
+          metrics_id + 1
+        else
+          metrics_id
+        end
 
-    (is_finished, last_ts)
+      metrics_reporter.step_metric(metric_name, _computation_name,
+        latest_metrics_id, computation_start, computation_end)
+
+      (is_finished, last_ts)
+
+        // match result
+        // | None => (true, computation_end)
+        // | let output: Out =>
+        //   _next.run[Out](metric_name, pipeline_time_spent, output, key,
+        //     producer_id, producer, router, target_id_router,
+        //     i_msg_uid, frac_ids,
+        //     computation_end, new_metrics_id, worker_ingress_ts,
+        //     metrics_reporter)
+        // | let outputs: Array[Out] val =>
+        //   var this_is_finished = true
+        //   var this_last_ts = computation_end
+
+        //   for (frac_id, output) in outputs.pairs() do
+        //     let o_frac_ids = match frac_ids
+        //     | None =>
+        //       recover val
+        //         Array[U32].init(frac_id.u32(), 1)
+        //       end
+        //     | let x: Array[U32 val] val =>
+        //       recover val
+        //         let z = Array[U32](x.size() + 1)
+        //         for xi in x.values() do
+        //           z.push(xi)
+        //         end
+        //         z.push(frac_id.u32())
+        //         z
+        //       end
+        //     end
+
+        //     (let f, let ts) = _next.run[Out](metric_name,
+        //       pipeline_time_spent, output, key, producer_id, producer,
+        //       router, target_id_router,
+        //       i_msg_uid, o_frac_ids,
+        //       computation_end, new_metrics_id, worker_ingress_ts,
+        //       metrics_reporter)
+
+        //     // we are sending multiple messages, only mark this message as
+        //     // finished if all are finished
+        //     if (f == false) then
+        //       this_is_finished = false
+        //     end
+
+        //     this_last_ts = ts
+        //   end
+        //   (this_is_finished, this_last_ts)
+        // end
+    else
+      @printf[I32]("ComputationRunner: Input was not correct type!\n"
+        .cstring())
+      Fail()
+      (true, latest_ts)
+    end
+
 
   fun name(): String => _computation.name()
   fun state_name(): StateName => ""
@@ -475,117 +430,49 @@ class ComputationRunner[In: Any val, Out: Any val]
   =>
     _next.clone_router_and_set_input_type(r)
 
-class PreStateRunner[In: Any val, Out: Any val, S: State ref]
-  let _target_ids: Array[RoutingId] val
-  let _state_comp: StateComputation[In, Out, S] val
-  let _partition_function: PartitionFunction[In] val
-  let _name: String
-  let _prep_name: String
+class StateRunner[In: Any val, Out: Any val, S: State ref] is (Runner &
+  RollbackableRunner & SerializableStateRunner)
   let _state_name: StateName
-
-  new iso create(state_comp: StateComputation[In, Out, S] val,
-    state_name': String, partition_function: PartitionFunction[In] val,
-    target_ids: Array[RoutingId] val)
-  =>
-    _target_ids = target_ids
-    _state_comp = state_comp
-    _name = _state_comp.name()
-    _prep_name = _name + " prep"
-    _state_name = state_name'
-    _partition_function = partition_function
-
-  fun ref run[D: Any val](metric_name: String, pipeline_time_spent: U64,
-    data: D, producer_id: RoutingId, producer: Producer ref, router: Router,
-    target_id_router: TargetIdRouter,
-    i_msg_uid: MsgId, frac_ids: FractionalMessageId,
-    latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64,
-    metrics_reporter: MetricsReporter ref): (Bool, U64)
-  =>
-    let wrapper_creation_start_ts =
-      ifdef "detailed_metrics" then
-        Time.nanos()
-      else
-        0
-      end
-    (let is_finished, let last_ts) =
-      match data
-      | let input: In =>
-        let key = _partition_function(input)
-        let processor: StateComputationWrapper[In, Out, S] =
-          StateComputationWrapper[In, Out, S](input, _state_name, key,
-            _state_comp, _target_ids)
-        router.route[StateComputationWrapper[In, Out, S]](
-          metric_name, pipeline_time_spent, processor, producer_id, producer,
-          i_msg_uid, frac_ids, latest_ts, metrics_id + 1,
-          worker_ingress_ts)
-      else
-        @printf[I32]("StateRunner: Input was not type In!\n"
-          .cstring())
-        Fail()
-        (true, latest_ts)
-      end
-    ifdef "detailed-metrics" then
-      ifdef debug then
-        Invariant(wrapper_creation_start_ts != 0)
-      end
-      let wrapper_creation_end_ts = Time.nanos()
-      metrics_reporter.step_metric(metric_name, _name, metrics_id,
-        wrapper_creation_start_ts, wrapper_creation_end_ts
-        where prefix = "Pre:")
-    end
-    (is_finished, last_ts)
-
-  fun name(): String => _name
-  fun state_name(): StateName => _state_name
-  fun is_pre_state(): Bool => true
-  fun clone_router_and_set_input_type(r: Router): Router
-  =>
-    r
-
-class StateRunner[S: State ref] is (Runner & RollbackableRunner &
-  SerializableStateRunner)
   let _canonical_state: S
-  let _state_name: StateName
+  let _state_comp: StateComputation[In, Out, S] val
+  let _next_runner: Runner
+
   var _state_map: Map[Key, S] = _state_map.create()
-  let _state_builder: {(): S} val
-  //TODO: this needs to be per-computation, rather than per-runner
-  let _state_change_repository: StateChangeRepository[S] ref
   let _event_log: EventLog
   let _wb: Writer = Writer
   let _rb: Reader = Reader
   let _auth: AmbientAuth
-  var _id: (U128 | None)
+  var _id: (RoutingId | None)
 
-  new iso create(state_name': StateName, state_builder: {(): S} val,
-    event_log: EventLog, auth: AmbientAuth)
+  new iso create(state_name': StateName,
+    state_comp: StateComputation[In, Out, S] val, event_log: EventLog,
+    auth: AmbientAuth, next_runner: Runner iso)
   =>
     _state_name = state_name'
-    _state_builder = state_builder
-    _canonical_state = _state_builder()
-    _state_change_repository = StateChangeRepository[S]
+    _state_comp = state_comp
+    _canonical_state = _state_comp.initial_state()
+    _next_runner = consume next_runner
     _event_log = event_log
+    //!@
     _id = None
     _auth = auth
 
-  fun ref set_step_id(id: U128) =>
+  //!@
+  fun ref set_step_id(id: RoutingId) =>
     _id = id
-
-  fun ref register_state_change(scb: StateChangeBuilder[S]) : U64 =>
-    _state_change_repository.make_and_register(scb)
 
   fun ref rollback(payload: ByteSeq val) =>
     replace_serialized_state(payload)
 
   fun ref run[D: Any val](metric_name: String, pipeline_time_spent: U64,
-    data: D, producer_id: RoutingId, producer: Producer ref, router: Router,
-    target_id_router: TargetIdRouter,
+    data: D, key: Key, producer_id: RoutingId, producer: Producer ref,
+    router: Router, target_id_router: TargetIdRouter,
     i_msg_uid: MsgId, frac_ids: FractionalMessageId,
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64,
     metrics_reporter: MetricsReporter ref): (Bool, U64)
   =>
     match data
-    | let sp: StateProcessor[S] =>
-      let key = sp.key()
+    | let input: In =>
       let state =
         try
           _state_map(key)?
@@ -596,7 +483,7 @@ class StateRunner[S: State ref] is (Runner & RollbackableRunner &
           else
             Fail()
           end
-          let new_state = _state_builder()
+          let new_state = _state_comp.initial_state()
           _state_map(key) = new_state
           new_state
         end
@@ -609,39 +496,78 @@ class StateRunner[S: State ref] is (Runner & RollbackableRunner &
           metrics_id + 1
         end
 
-      let result = sp(state, _state_change_repository, target_id_router,
-        metric_name, pipeline_time_spent, producer_id, producer,
-        i_msg_uid, frac_ids, latest_ts, new_metrics_id, worker_ingress_ts)
-      let is_finished = result._1
-      let state_change = result._2
-      let sc_start_ts = result._3
-      let sc_end_ts = result._4
-      let last_ts = result._5
+      let computation_start = Time.nanos()
+      let result = _state_comp(input, state)
+      let computation_end = Time.nanos()
+
+      (let is_finished, let last_ts) =
+        OutputProcessor[In](_next, metric_name, pipeline_time_spent, result,
+          key, producer_id, producer, router, target_id_router,
+          i_msg_uid, frac_ids, computation_end, new_metrics_id,
+          worker_ingress_ts, metrics_reporter)
 
       let latest_metrics_id = ifdef "detailed-metrics" then
-          metrics_reporter.step_metric(metric_name, sp.name(), metrics_id,
-            latest_ts, sc_start_ts where prefix = "Before")
+          metrics_reporter.step_metric(metric_name, _state_comp.name(),
+            metrics_id, latest_ts, computation_start where prefix = "Before")
           metrics_id + 1
         else
           metrics_id
         end
 
-      metrics_reporter.step_metric(metric_name, sp.name(), latest_metrics_id,
-        sc_start_ts, sc_end_ts)
-
-      // TODO: This applies the state change but doesn't write it to disk since
-      // that's not currently supported with our new recovery protocol. Either
-      // remove the StateChange from API or implement this feature.
-      match state_change
-      | let sc: StateChange[S] ref =>
-        sc.apply(state)
-      | let dsc: DirectStateChange =>
-        None
-      end
+      metrics_reporter.step_metric(metric_name, _state_comp.name(),
+        latest_metrics_id, computation_start, computation_end)
 
       (is_finished, last_ts)
+
+        // match result
+        // | None => (true, computation_end)
+        // | let output: Out =>
+        //   _next.run[Out](metric_name, pipeline_time_spent, output, key,
+        //     producer_id, producer, router, target_id_router,
+        //     i_msg_uid, frac_ids,
+        //     computation_end, new_metrics_id, worker_ingress_ts,
+        //     metrics_reporter)
+        // | let outputs: Array[Out] val =>
+        //   var this_is_finished = true
+        //   var this_last_ts = computation_end
+
+        //   for (frac_id, output) in outputs.pairs() do
+        //     let o_frac_ids = match frac_ids
+        //     | None =>
+        //       recover val
+        //         Array[U32].init(frac_id.u32(), 1)
+        //       end
+        //     | let x: Array[U32 val] val =>
+        //       recover val
+        //         let z = Array[U32](x.size() + 1)
+        //         for xi in x.values() do
+        //           z.push(xi)
+        //         end
+        //         z.push(frac_id.u32())
+        //         z
+        //       end
+        //     end
+
+        //     (let f, let ts) = _next.run[Out](metric_name,
+        //       pipeline_time_spent, output, key, producer_id, producer,
+        //       router, target_id_router,
+        //       i_msg_uid, o_frac_ids,
+        //       computation_end, new_metrics_id, worker_ingress_ts,
+        //       metrics_reporter)
+
+        //     // we are sending multiple messages, only mark this message as
+        //     // finished if all are finished
+        //     if (f == false) then
+        //       this_is_finished = false
+        //     end
+
+        //     this_last_ts = ts
+        //   end
+        //   (this_is_finished, this_last_ts)
+        // end
     else
-      @printf[I32]("StateRunner: Input was not a StateProcessor!\n".cstring())
+      @printf[I32]("StateComputationRunner: Input was not correct type!\n"
+        .cstring())
       Fail()
       (true, latest_ts)
     end
@@ -690,7 +616,7 @@ class StateRunner[S: State ref] is (Runner & RollbackableRunner &
     else
       // We got the key but no accompanying state, so we initialize
       // ourselves.
-      _state_map(key) = _state_builder()
+      _state_map(key) = _state_comp.initial_state()
       step.register_key(s_name, key)
     end
 
@@ -701,7 +627,7 @@ class StateRunner[S: State ref] is (Runner & RollbackableRunner &
         try
           _state_map.remove(key)?._2
         else
-          _state_builder()
+          _state_comp.initial_state()
         end
       Serialised(SerialiseAuth(_auth), state)?
         .output(OutputSerialisedAuth(_auth))
@@ -794,19 +720,26 @@ interface Stringablike
   fun string(): String
 
 class iso RouterRunner
+  let _grouper: Grouper
+
+  new create(g: (Shuffler | KeyGrouper | None)) =>
+    match g
+    | let s: Shuffler => _grouper = s
+    | let kg: KeyGrouper => _grouper = kg
+    else
+      _grouper = OneToOneGrouper
+    end
+
   fun ref run[D: Any val](metric_name: String, pipeline_time_spent: U64,
-    data: D, producer_id: RoutingId, producer: Producer ref, router: Router,
-    target_id_router: TargetIdRouter,
+    data: D, key: Key, producer_id: RoutingId, producer: Producer ref,
+    router: Router, target_id_router: TargetIdRouter,
     i_msg_uid: MsgId, frac_ids: FractionalMessageId,
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64,
     metrics_reporter: MetricsReporter ref): (Bool, U64)
   =>
-    match router
-    | let r: Router =>
-      r.route[D](metric_name, pipeline_time_spent, data, producer_id,
-        producer, i_msg_uid, frac_ids, latest_ts, metrics_id,
-        worker_ingress_ts)
-    end
+    let key = _grouper[D](data)
+    router.route[D](metric_name, pipeline_time_spent, data, key, producer_id,
+      producer, i_msg_uid, frac_ids, latest_ts, metrics_id, worker_ingress_ts)
 
   fun name(): String => "Router runner"
   fun state_name(): StateName => ""

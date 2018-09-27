@@ -47,7 +47,7 @@ actor Startup
   let _env: Env
   var _startup_options: StartupOptions = StartupOptions
 
-  let _application: Application val
+  let _pipeline: BasicPipeline val
   let _app_name: String
 
   var _external_host: String = ""
@@ -80,16 +80,11 @@ actor Startup
   var _is_joining: Bool = false
   var _is_recovering: Bool = false
 
-  new create(env: Env, application: Application val,
-    app_name: (String | None))
-  =>
+  new create(env: Env, app_name: String, pipeline: BasicPipeline val) =>
     _env = env
-    _application = application
-    _app_name = match app_name
-      | let n: String => n
-      else
-        ""
-      end
+    _app_name = app_name
+    _pipeline = pipeline
+
     ifdef "resilience" then
       @printf[I32]("****RESILIENCE MODE is active****\n".cstring())
     end
@@ -211,7 +206,7 @@ actor Startup
       // TODO::joining
       let connect_auth = TCPConnectAuth(auth)
       let metrics_conn = ReconnectingMetricsSink(m_addr(0)?,
-          m_addr(1)?, _application.name(), _startup_options.worker_name)
+          m_addr(1)?, _app_name, _startup_options.worker_name)
 
       let event_log_dir_filepath = _event_log_dir_filepath as FilePath
       _the_journal = _start_journal(auth)
@@ -278,7 +273,7 @@ actor Startup
       end
       let event_log = _event_log as EventLog
 
-      let connections = Connections(_application.name(),
+      let connections = Connections(_app_name,
         _startup_options.worker_name, auth,
         _startup_options.c_host, _startup_options.c_service,
         _startup_options.d_host, _startup_options.d_service,
@@ -317,9 +312,8 @@ actor Startup
       let data_receivers = DataReceivers(auth, connections,
         _startup_options.worker_name, _is_recovering)
 
-      let router_registry = RouterRegistry(auth,
-        _startup_options.worker_name, data_receivers,
-        connections, this,
+      let router_registry = RouterRegistry(auth, _startup_options.worker_name,
+        data_receivers, connections, this,
         _startup_options.stop_the_world_pause, _is_joining, initializer_name,
         barrier_initiator, checkpoint_initiator, autoscale_initiator,
         initializer_name)
@@ -345,7 +339,7 @@ actor Startup
 
       let local_topology_initializer =
         LocalTopologyInitializer(
-          _application, _startup_options.worker_name,
+          _app_name, _startup_options.worker_name,
           _env, auth, connections, router_registry, metrics_conn,
           _startup_options.is_initializer, data_receivers, event_log, recovery,
           recovery_reconnecter, checkpoint_initiator, barrier_initiator,
@@ -366,8 +360,8 @@ actor Startup
 
       if _startup_options.is_initializer then
         @printf[I32]("Running as Initializer...\n".cstring())
-        _application_distributor = ApplicationDistributor(auth, _application,
-          local_topology_initializer)
+        _application_distributor = ApplicationDistributor(auth, _app_name,
+          _pipeline, local_topology_initializer)
 
         match _application_distributor
         | let ad: ApplicationDistributor =>
@@ -450,7 +444,7 @@ actor Startup
       let initializer_name = "initializer"
 
       let metrics_conn = ReconnectingMetricsSink(m.metrics_host,
-        m.metrics_service, _application.name(), _startup_options.worker_name)
+        m.metrics_service, _app_name, _startup_options.worker_name)
 
       // TODO: Are we creating connections to all addresses or just
       // initializer?
@@ -510,7 +504,7 @@ actor Startup
       end
       let event_log = _event_log as EventLog
 
-      let connections = Connections(_application.name(),
+      let connections = Connections(_app_name,
         _startup_options.worker_name,
         auth, c_host, c_service, d_host, d_service,
         metrics_conn, m.metrics_host, m.metrics_service,
@@ -561,7 +555,7 @@ actor Startup
 
       let local_topology_initializer =
         LocalTopologyInitializer(
-          _application, _startup_options.worker_name,
+          _app_name, _startup_options.worker_name,
           _env, auth, connections, router_registry, metrics_conn,
           _startup_options.is_initializer, data_receivers,
           event_log, recovery, recovery_reconnecter, checkpoint_initiator,

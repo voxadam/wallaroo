@@ -103,25 +103,34 @@ def test_auto15():
 def test_grow1_shrink1_crash2_wait2_recover2():
     command = 'multi_partition_detector --depth 1 --internal-source'
 <<<<<<< HEAD
+<<<<<<< HEAD
     ops = [Wait(2), Grow(1), Wait(2), Shrink(1), Wait(2), Crash(2), Wait(2), Recover(2)]
 =======
     ops = [Grow(1), Wait(2), Shrink(1), Wait(2), Crash(2), Wait(2), Recover(2)]
 >>>>>>> 9b93feda... Use internal source for crash-recovery tests
+=======
+    ops = [Wait(2), Grow(1), Wait(2), Shrink(1), Wait(2), Crash(2), Wait(2), Recover(2)]
+>>>>>>> 04a82be7... Fix boundary message ordering bug
     _test_resilience(command, ops, validate_output=True, sources=0)
 
 
 def test_crash1_wait2_recover1():
     command = 'multi_partition_detector --depth 1 --internal-source'
 <<<<<<< HEAD
+<<<<<<< HEAD
     ops = [Wait(2), Crash(1), Wait(2), Recover(1)]
 =======
     ops = [Crash(1), Wait(2), Recover(1)]
 >>>>>>> 9b93feda... Use internal source for crash-recovery tests
+=======
+    ops = [Wait(2), Crash(1), Wait(2), Recover(1)]
+>>>>>>> 04a82be7... Fix boundary message ordering bug
     _test_resilience(command, ops, validate_output=True, sources=0)
 
 
 def test_crash2_wait2_recover2():
     command = 'multi_partition_detector --depth 1 --internal-source'
+<<<<<<< HEAD
 <<<<<<< HEAD
     ops = [Wait(2), Crash(2), Wait(2), Recover(2)]
     _test_resilience(command, ops, validate_output=True, sources=0)
@@ -141,6 +150,16 @@ def test_grow1_wait2_shrink1_wait_2_times_ten():
     ops = [Wait(2), Grow(1), Wait(2), Shrink(1), Wait(2)]
     _test_resilience(command, ops, validate_output=True, cycles=10, sources=0)
 >>>>>>> 9b93feda... Use internal source for crash-recovery tests
+=======
+    ops = [Wait(2), Crash(2), Wait(2), Recover(2)]
+    _test_resilience(command, ops, validate_output=True, sources=0)
+
+
+# def test_grow1_wait2_shrink1_wait_2_times_ten():
+#     command = 'multi_partition_detector --depth 1 --internal-source'
+#     ops = [Wait(2), Grow(1), Wait(2), Shrink(1), Wait(2)]
+#     _test_resilience(command, ops, validate_output=True, cycles=10, sources=0)
+>>>>>>> 04a82be7... Fix boundary message ordering bug
 
 
 # The following tests only works if multi_partition_detector is compiled

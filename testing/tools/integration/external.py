@@ -170,7 +170,11 @@ def save_logs_to_file(base_dir, log_stream=None, persistent_data={}):
                 name=rd.name,
                 code=rd.returncode,
                 pid=rd.pid,
+<<<<<<< HEAD
                 time=strftime(rd.start_time, STRFTIME_FMT))
+=======
+                time=rd.start_time.strftime('%Y%m%d_%H%M%S.%f'))
+>>>>>>> 9b93feda... Use internal source for crash-recovery tests
             with open(os.path.join(base_dir, worker_log_name), 'wb') as f:
                 f.write('{identifier} ->\n\n{stdout}\n\n{identifier} <-'
                     .format(identifier="--- {name} (pid: {pid}, rc: {rc})"
@@ -183,7 +187,11 @@ def save_logs_to_file(base_dir, log_stream=None, persistent_data={}):
         for sd in sender_data:
             sender_log_name = 'sender_{address}_{time}.error.dat'.format(
                 address=sd.address.replace(':', '.'),
+<<<<<<< HEAD
                 time=strftime(sd.start_time, STRFTIME_FMT))
+=======
+                time=sd.start_time.strftime('%Y%m%d_%H%M%S.%f'))
+>>>>>>> 9b93feda... Use internal source for crash-recovery tests
             with open(os.path.join(base_dir, sender_log_name), 'wb') as f:
                 f.write(''.join(sd.data))
 
@@ -192,7 +200,11 @@ def save_logs_to_file(base_dir, log_stream=None, persistent_data={}):
         for sk in sink_data:
             sink_log_name = 'sink_{address}_{time}.error.dat'.format(
                 address=sk.address.replace(':', '.'),
+<<<<<<< HEAD
                 time=strftime(sk.start_time, STRFTIME_FMT))
+=======
+                time=sk.start_time.strftime('%Y%m%d_%H%M%S.%f'))
+>>>>>>> 9b93feda... Use internal source for crash-recovery tests
             with open(os.path.join(base_dir, sink_log_name), 'wb') as f:
                 f.write(''.join(sk.data))
         logging.warn("Error logs saved to {}".format(base_dir))

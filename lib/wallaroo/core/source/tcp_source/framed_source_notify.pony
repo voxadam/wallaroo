@@ -70,7 +70,6 @@ class TCPSourceNotify[In: Any val]
 
   fun ref received(source: TCPSource[In] ref, data: Array[U8] iso): Bool =>
     if _header then
-      @printf[I32]("!@ <><><> Header (size: %s)\n".cstring(), data.size().string().cstring())
       try
         let payload_size: USize = _handler.payload_length(consume data)?
         source.expect(payload_size)
@@ -80,8 +79,6 @@ class TCPSourceNotify[In: Any val]
       end
       true
     else
-      @printf[I32]("!@ <><><> Payload (size: %s)\n".cstring(), data.size().string().cstring())
-
       _metrics_reporter.pipeline_ingest(_pipeline_name, _source_name)
       let ingest_ts = Time.nanos()
       let pipeline_time_spent: U64 = 0

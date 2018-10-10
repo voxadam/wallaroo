@@ -200,7 +200,6 @@ actor TCPSource[In: Any val] is Source
     In case we pop into existence midway through a checkpoint, we need to
     wait until this is called to start processing.
     """
-    @printf[I32]("!@ TCPSource: first_checkpoint_complete()\n".cstring())
     _unmute_local()
     _is_pending = false
     for (id, c) in _outputs.pairs() do
@@ -851,4 +850,3 @@ actor TCPSource[In: Any val] is Source
     """
     // TODO: verify that removal of "in_sent" check is harmless
     _expect = _notify.expect(this, qty)
-    @printf[I32]("!@ TCPSource: set expect to %s\n".cstring(), _expect.string().cstring())

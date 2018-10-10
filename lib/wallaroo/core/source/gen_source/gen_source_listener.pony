@@ -72,7 +72,6 @@ actor GenSourceListener[In: Any val] is SourceListener
   let _recovering: Bool
   let _pre_state_target_ids: Array[RoutingId] val
   let _target_router: Router
-  let _sources: Array[Source] = _sources.create()
 
   let _sources: Array[GenSource[In]] = _sources.create()
 
@@ -143,6 +142,7 @@ actor GenSourceListener[In: Any val] is SourceListener
     for s in _sources.values() do
       s.unmute(this)
     end
+    _sources.push(source)
 
   be recovery_protocol_complete() =>
     for s in _sources.values() do

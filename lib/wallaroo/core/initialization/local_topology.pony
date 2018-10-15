@@ -1174,6 +1174,14 @@ actor LocalTopologyInitializer is LayoutInitializer
                 built_stateless_steps(partition_routing_id) =
                   router_stateless_steps
 
+                let proxies = recover iso Map[WorkerName, ProxyRouter] end
+                for (w, ob) in _outgoing_boundaries.pairs() do
+                  let w_routing_id =
+                    stateless_partition_routing_ids(partition_routing_id)?(
+                      w)?
+
+                end
+
                 // !@ Where do we get proxies from? Probably we update the code
                 // so we just pass in boundaries.
                 let next_router = StatelessPartitionRouter(

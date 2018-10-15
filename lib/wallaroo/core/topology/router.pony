@@ -1034,7 +1034,7 @@ class val LocalPartitionRouterBlueprint[S: State ref]
       state_steps, state_step_ids, consume hashed_node_routes,
       new_hash_partitions, _state_routing_ids)
 
-trait val StatelessPartitionRouter is Router
+class val StatelessPartitionRouter is Router
   let _partition_id: RoutingId
   let _worker_name: String
   let _workers: Array[WorkerName] val
@@ -1241,7 +1241,7 @@ trait val StatelessPartitionRouter is Router
 
   fun eq(that: box->Router): Bool =>
     match that
-    | let o: box->LocalStatelessPartitionRouter =>
+    | let o: box->StatelessPartitionRouter =>
       //!@ We need to figure this out:
       true
     else
@@ -1251,7 +1251,7 @@ trait val StatelessPartitionRouter is Router
   fun hash(): USize =>
     _partition_id.hash()
 
-trait val StatelessPartitionRouterBlueprint
+class val StatelessPartitionRouterBlueprint
   let _partition_id: RoutingId
   let _workers: Array[WorkerName] val
   let _stateless_partition_routing_ids: Map[WorkerName, RoutingId] val

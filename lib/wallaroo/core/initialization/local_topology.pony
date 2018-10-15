@@ -1005,52 +1005,52 @@ actor LocalTopologyInitializer is LayoutInitializer
         //   I. Acylic graph
         /////////
 
-        let frontier = Array[DagNode[StepInitializer] val]
+        let nodes_to_initialize = Array[DagNode[StepInitializer] val]
 
         /////////
-        // 1. Find graph sinks and add to frontier queue.
+        // 1. Find graph sinks and add to nodes to initialize queue.
         //    We'll work our way backwards.
-        //    We use temp_frontier to ensure that we add to the initialization
-        //    frontier in waves, starting with all sinks, followed by all
-        //    inputs to those sinks, followed by all inputs to those inputs,
-        //    etc. until we get to the sources.
-        let temp_frontier = Array[DagNode[StepInitializer] val]
+        //    We use a frontier queue to ensure that we add to the
+        //    initialization queue in waves, starting with all sinks, followed
+        //    by all inputs to those sinks, followed by all inputs to those
+        //    inputs, etc. until we get to the sources.
+        let frontier = Array[DagNode[StepInitializer] val]
 
-        @printf[I32]("Adding sink nodes to frontier\n".cstring())
+        @printf[I32]("Adding sink nodes to nodes to initialize\n".cstring())
         for sink_node in graph.sinks() do
-          @printf[I32](("Adding %s node to frontier\n").cstring(),
+          @printf[I32](("Adding %s node to nodes to initialize\n").cstring(),
             sink_node.value.name().cstring())
+          nodes_to_initialize.push(sink_node)
           frontier.push(sink_node)
-          temp_frontier.push(sink_node)
         end
 
-        while temp_frontier.size() > 0 do
-          let next_node = temp_frontier.shift()?
+        while frontier.size() > 0 do
+          let next_node = frontier.shift()?
           for i_node in next_node.ins() do
-            if not frontier.contains(i_node) then
-              @printf[I32](("Adding %s node to frontier\n").cstring(),
-                i_node.value.name().cstring())
+            if not nodes_to_initialize.contains(i_node) then
+              @printf[I32](("Adding %s node to nodes to initialize\n")
+                .cstring(), i_node.value.name().cstring())
+              nodes_to_initialize.push(i_node)
               frontier.push(i_node)
-              temp_frontier.push(i_node)
             end
           end
         end
 
         /////////
-        // 2. Loop: Check next frontier item for if all outgoing steps have
-        //          been created
-        //       if no, send to end of frontier queue.
-        //       if yes, add ins to frontier queue, then build the step
-        //         (connecting it to its out steps, which have already been
-        //         built)
+        // 2. Loop: Check next node to initialize for if all outgoing steps
+        //          have been created.
+        //       if no, send to end of nodes to initialize queue.
+        //       if yes, add ins to nodes to initialize queue, then build the
+        //         step (connecting it to its out steps, which have already
+        //         been built)
         // If there are no cycles (I), this will terminate
-        while frontier.size() > 0 do
+        while nodes_to_initialize.size() > 0 do
           let next_node =
             try
-              frontier.shift()?
+              nodes_to_initialize.shift()?
             else
-              @printf[I32](("Graph frontier queue was empty when node was " +
-                "still expected\n").cstring())
+              @printf[I32](("Graph nodes to initialize queue was empty when " +
+                "node was still expected\n").cstring())
               error
             end
 
@@ -1079,13 +1079,14 @@ actor LocalTopologyInitializer is LayoutInitializer
               // node id. For example, if this is a parallel stateless
               // computation, then there will be an execution id for each
               // of the n steps that must be created given a parallelism of n.
-              let node_id = node.id
+              let node_id = next_node.id
               let execution_ids = t.routing_ids()(node_id)?
-              if builder.is_stateful then
+              if builder.is_stateful() then
                 //////////////////////////////////
                 // STATE COMPUTATION
 
                 //!@ TODO: HANDLE THIS!
+                None
               else
                 //////////////////////////////////
                 // STATELESS COMPUTATION
@@ -1139,15 +1140,15 @@ actor LocalTopologyInitializer is LayoutInitializer
                 // to create a StatelessPartitionRouter.
                 let router_stateless_steps_iso = recover iso Array[Step] end
                 let router_stateless_step_ids_iso =
-                  recover iso Array[RoutingId] end
+                  recover iso MapIs[Step, RoutingId] end
                 for r_id in execution_ids.values() do
-                  let next_step = builder(r_id, out_router, _metrics_conn,
-                    _event_log, _recovery_replayer, _auth,
+                  let next_step = builder(r_id, _worker_name, out_router,
+                    _metrics_conn, _event_log, _recovery_replayer, _auth,
                     _outgoing_boundaries, _router_registry)
 
                   router_stateless_steps_iso.push(next_step)
                   router_stateless_step_ids_iso(next_step) = r_id
-                  data_routes(next_id) = next_step
+                  data_routes(r_id) = next_step
                   _initializables.set(next_step)
 
                   // If our outputs are going to be routed through a
@@ -1168,18 +1169,22 @@ actor LocalTopologyInitializer is LayoutInitializer
                 // group, we need to record that we built this group and
                 // then create the StatelessPartitionRouter that routes
                 // messages to it.
-                let router_stateless_steps = consume router_stateless_steps_iso
+                let router_stateless_steps =
+                  consume val router_stateless_steps_iso
                 let router_stateless_step_ids =
-                  consume router_stateless_step_ids_iso
+                  consume val router_stateless_step_ids_iso
                 built_stateless_steps(partition_routing_id) =
                   router_stateless_steps
 
                 let proxies = recover iso Map[WorkerName, ProxyRouter] end
                 for (w, ob) in _outgoing_boundaries.pairs() do
                   let w_routing_id =
-                    stateless_partition_routing_ids(partition_routing_id)?(
+                    t.stateless_partition_routing_ids(partition_routing_id)?(
                       w)?
-
+                  let proxy_address = ProxyAddress(w, w_routing_id)
+                  let proxy_router = ProxyRouter(_worker_name, ob,
+                    proxy_address, _auth)
+                  proxies(w) = proxy_router
                 end
 
                 // !@ Where do we get proxies from? Probably we update the code
@@ -1188,19 +1193,33 @@ actor LocalTopologyInitializer is LayoutInitializer
                   partition_routing_id, _worker_name, t.worker_names,
                   router_stateless_steps, router_stateless_step_ids,
                   t.stateless_partition_routing_ids(partition_routing_id)?,
-                  ???!@proxies(Map[WorkerName, ProxyRouter] val),
-                  execution_ids.size())
+                  consume proxies, execution_ids.size())
 
-                built_routers(next_id) = next_router
+                built_routers(node_id) = next_router
               end
             // !@ KEEP MATCHING!!!
-            | ...
+            // | ...
             end
           else
-            frontier.push(next_node)
+            nodes_to_initialize.push(next_node)
           end
+
+
+        //!@ Here ends the "nodes to initialize" while loop
         end
 
+////
+// !@ More initializing...
+////
+
+
+      //!@ Here ends the _topology match
+      end
+    //!@ Here ends the initialization outer try block
+    else
+      @printf[I32]("Error initializing topology!\n".cstring())
+      Fail()
+    end
 //!@!@
 
   fun ref _initialize_joining_worker() =>

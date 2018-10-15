@@ -51,20 +51,20 @@ class val StepBuilder
 
   new val create(app_name: String,
     pipeline_name': String, r: RunnerBuilder, id': RoutingId,
-    routing_group: (StateName | RoutingId),
+    routing_group': (StateName | RoutingId),
     grouper: (Shuffle | GroupByKey | None) = None, is_stateful': Bool = false)
   =>
     _app_name = app_name
     _pipeline_name = pipeline_name'
     _runner_builder = r
-    _state_name = _runner_builder.state_name()
+    _routing_group = routing_group'
     _id = id'
     _grouper = grouper
     _is_stateful = is_stateful'
     _parallelism = r.parallelism()
 
   fun name(): String => _runner_builder.name()
-  fun state_name(): String => _state_name
+  fun routing_group(): (StateName | RoutingId | None) => _routing_group
   fun pipeline_name(): String => _pipeline_name
   fun id(): RoutingId => _id
   fun is_prestate(): Bool => _runner_builder.is_prestate()
@@ -91,7 +91,6 @@ class val SourceData
   let _id: RoutingId
   let _pipeline_name: String
   let _name: String
-  let _state_name: String
   let _runner_builder: RunnerBuilder
   let _grouper: (Shuffle | GroupByKey | None)
   let _source_listener_builder_builder: SourceListenerBuilderBuilder
@@ -105,13 +104,12 @@ class val SourceData
     _name = "| " + _pipeline_name + " source | " + r.name() + "|"
     _runner_builder = r
     _grouper = grouper
-    _state_name = _runner_builder.state_name()
     _source_listener_builder_builder = s
 
   fun runner_builder(): RunnerBuilder => _runner_builder
 
   fun name(): String => _name
-  fun state_name(): String => _state_name
+  fun routing_group(): (StateName | RoutingId | None) => None
   fun pipeline_name(): String => _pipeline_name
   fun id(): RoutingId => _id
   fun is_prestate(): Bool => _runner_builder.is_prestate()
@@ -121,7 +119,6 @@ class val SourceData
 
   fun source_listener_builder_builder(): SourceListenerBuilderBuilder =>
     _source_listener_builder_builder
-
 
 class val EgressBuilder
   let _name: String
@@ -149,7 +146,7 @@ class val EgressBuilder
     _sink_builder = sink_builder
 
   fun name(): String => _name
-  fun state_name(): String => ""
+  fun routing_group(): (StateName | RoutingId | None) => None
   fun pipeline_name(): String => _pipeline_name
   fun id(): RoutingId => _id
   fun is_prestate(): Bool => false

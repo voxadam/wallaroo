@@ -953,7 +953,7 @@ actor LocalTopologyInitializer is LayoutInitializer
 
         // Determine if we need to read in local keys for our state collections
         let local_keys: Map[StateName, SetIs[Key] val] val =
-          if not _recovering then
+          if _recovering then
             @printf[I32]("Reading local keys from file.\n".cstring())
             try
               _local_keys_file.read_local_keys(

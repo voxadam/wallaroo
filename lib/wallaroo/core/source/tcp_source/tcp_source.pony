@@ -696,7 +696,7 @@ actor TCPSource[In: Any val] is Source
           return
         end
 
-        // distribute and data we've already read that is in the `read_buf`
+        // distribute the data we've already read that is in the `read_buf`
         // and able to be distributed
         while (_read_buf_offset >= _expect) and (_read_buf_offset > 0) do
           // get data to be distributed and update `_read_buf_offset`
